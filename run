@@ -1,0 +1,115 @@
+#!/bin/bash
+MONGO_PORT="27017"
+
+#Restore function, downloads the selected file from S3Bucket, unzips, restores and clean up files.
+function getIp {
+  read -a IP <<<$(dig mongo | grep mongo. | awk '{print $5}' | tail -n 3 | xargs )
+  echo "Found mongodb hosts: ${IP[*]}"
+}
+
+function restore {
+  echo "Connecting to $MONGO_HOST restoring $FILE, this could take up to 30 minutes"
+  echo "Downloading $FILE from $S3BUCKET Bucket"
+  aws s3api get-object --bucket $S3BUCKET --key $FILE /backup/$FILE
+  echo "Extracting file"
+  tar -zxvf /backup/$FILE -C /backup
+  echo "Restoring file to database"
+  mongorestore -h $MONGO_HOST -p $MONGO_PORT dump/
+  echo "Cleaning up..."
+  echo "restored $FILE complete."
+  rm -rf /backup/*.tar.gz
+  rm -rf /backup/dump/
+  mkdir /backup/dump
+  exit
+}
+function catalogRestore {
+ echo -n "Do you want to restore a collection from the latest backup? [Yes] [No]"
+ read collectionsOption
+ if [ $collectionsOption == "Yes" ]; then
+   echo "Determining backup to restore."
+
+   : ${FILER:=$(aws s3 ls s3://$S3BUCKET | awk -F " " '{print $4}' | grep ^$FILEPREFIX | sort -r | head -n1)}
+
+   echo "Downloading $FILER from $S3BUCKET Bucket"
+   aws s3api get-object --bucket $S3BUCKET --key $FILER /backup/$FILER
+   echo "Extracting file"
+   tar -zxvf /backup/$FILER -C /backup
+   ls -la /backup/dump/
+   echo -n "From which database would you like to restore your collections?"
+   read collectionsChoice
+   ls -lah /backup/dump/$collectionsChoice
+   echo -n "which collection do you want to restore? (Make sure to pick the .bson file or the backup wont work)"
+   read collectionsChoiceTwo
+ mongorestore -h $MONGO_HOST -p $MONGO_PORT -d $collectionsChoice -c $collectionsChoiceTwo /backup/dump/$collectionsChoice/$collectionsChoiceTwo
+ rm -rf /backup/*.tar.gz
+ rm -rf /backup/dump/
+ mkdir /backup/dump
+ exit
+fi
+
+
+if [ $collectionsOption == "No" ]; then
+  echo "Listing dumps to pick from"
+  aws s3api list-objects --bucket $S3BUCKET --query 'Contents[].{Key: Key, Size: Size}' --output table
+
+  echo "Which backup do you want to restore collection from?"
+  read FILE3
+  echo "Downloading $FILE3 from $S3BUCKET Bucket"
+  aws s3api get-object --bucket $S3BUCKET --key $FILE3 /backup/$FILE3
+  echo "Extracting file"
+  tar -zxvf /backup/$FILE3 -C /backup
+  ls -la /backup/dump/
+  echo -n "From which database would you like to restore your collections?"
+  read collectionsChoice
+  ls -lah /backup/dump/$collectionsChoice
+  echo -n "which collection do you want to restore? (Make sure to pick the .bson file or the backup wont work)"
+  read collectionsChoiceTwo
+ mongorestore -h $MONGO_HOST -p $MONGO_PORT -d $collectionsChoice -c $collectionsChoiceTwo /backup/dump/$collectionsChoice/$collectionsChoiceTwo
+ rm -rf /backup/*.tar.gz
+ rm -rf /backup/dump/
+ mkdir /backup/dump
+exit
+  fi
+}
+
+#Checks for the primary Host
+function checkHostPrimary {
+  for CANDIDATE in ${IP[*]}
+  do
+    IS_MASTER=$(mongo --host $CANDIDATE --eval "printjson(db.isMaster())" | grep 'ismaster')
+    if [[ $IS_MASTER == *"true"* ]]; then
+     MONGO_HOST=$CANDIDATE
+     echo "$MONGO_HOST detected as primary"
+    fi
+  done
+}
+getIp
+checkHostPrimary
+
+echo -n "Would you like to restore the latest copy from the bucket, list backups, pick which backup to restore from or restore from specific catalog? [latest] [list] [pick] [catalog]: "
+read option
+if [ $option == "latest" ]; then
+  echo "Determining backup to restore."
+
+  : ${FILE:=$(aws s3 ls s3://$S3BUCKET | awk -F " " '{print $4}' | grep ^$FILEPREFIX | sort -r | head -n1)}
+  restore
+fi
+if [ $option == "list" ]; then
+  echo "Listing backups:"
+  aws s3api list-objects --bucket $S3BUCKET --query 'Contents[].{Key: Key, Size: Size}' --output table
+fi
+
+if [ $option == "pick" ]; then
+  echo -n "Please enter the keyname of the file you want to restore e.g (mongodb.backup.PROD.2017-07-20-12-36-59.tar.gz) "
+  read FILE
+  restore
+fi
+
+if [ $option == "catalog" ]; then
+  catalogRestore
+fi
+
+if [ $option != "pick" ] || [ $option != "List" ] || [ $option != "Latest" ] || [ $option != "Catalog" ]; then
+  bash ./run
+fi
+
