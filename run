@@ -35,7 +35,7 @@ echo -n "Do you want to restore a collection from the latest backup? [Yes] [No]"
    read collectionsChoice
    echo -n "which collection do you want to restore?"
    read collectionsChoiceTwo
-   mongorestore -h $MONGO_HOST -p $MONGO_PORT -d $collectionsChoice -c $collectionsChoiceTwo --gzip archive
+   mongorestore -h $MONGO_HOST -p $MONGO_PORT -d $collectionsChoice -c $collectionsChoiceTwo --gzip --archive=/backup/$FILER
    rm -rf /backup/*.bak
  exit
 fi
@@ -53,7 +53,7 @@ if [ $collectionsOption == "No" ]; then
 	read collectionsChoice
 	echo -n "Which collection do you want to restore?"
 	read collectionsChoiceTwo
-	mongorestore -h $MONGO_HOST -p $MONGO_PORT -d $collectionsChoice -c $collectionsChoiceTwo --gzip archive=/backup/$FILE3
+	mongorestore -h $MONGO_HOST -p $MONGO_PORT -d $collectionsChoice -c $collectionsChoiceTwo --gzip --archive=/backup/$FILE3
 	rm -rf /backup/*.bak
 	exit
   fi
